@@ -5,8 +5,16 @@
 # Requirements: pip install pydrive2
 
 import os
+import argparse
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
+
+# Parse command line arguments
+parser = argparse.ArgumentParser(description="Backup a local folder to Google Drive.")
+parser.add_argument("-s", "--source", required=True, help="Local source path to back up")
+parser.add_argument("-d", "--destination", required=True, help="Target Google Drive folder ID")
+parser.add_argument("-z", "--zip", action="store_true", help="Zip files before uploading (to be implemented)")
+args = parser.parse_args()
 
 # Step 1: Authenticate
 gauth = GoogleAuth()
@@ -29,10 +37,10 @@ gauth.SaveCredentialsFile("credentials.json")
 
 drive = GoogleDrive(gauth)
 
-# CONFIG: local folder to back up, and target folder ID in Drive
-LOCAL_FOLDER = "/home/ariel/Documents/obsidian-vault/ari-work"
-# DRIVE_FOLDER_ID = "1TmQT1I50HSdkj2IFSQMe8Yd3HrVkxsJA" # test folder
-DRIVE_FOLDER_ID = "1QltAup63awYvnB5LxuH0oWbCYc2K_12D"
+# CONFIG: Use command line arguments mapping
+LOCAL_FOLDER = args.source
+DRIVE_FOLDER_ID = args.destination
+ZIP_SUPPORT = args.zip
 
 # Folders to exclude from backup (names only, not paths)
 EXCLUDE_DIRS = [".obsidian", "__pycache__", ".git"]
