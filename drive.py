@@ -6,6 +6,8 @@
 
 import os
 import argparse
+import shutil
+import tempfile
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
 
@@ -43,7 +45,7 @@ DRIVE_FOLDER_ID = args.destination
 ZIP_SUPPORT = args.zip
 
 # Folders to exclude from backup (names only, not paths)
-EXCLUDE_DIRS = [".obsidian", "__pycache__", ".git"]
+EXCLUDE_DIRS = [".obsidian", "__pycache__", ".git", ".vscode"]
 
 # Cache of created Drive folders (local path → Drive folder ID)
 folder_cache = {}
@@ -89,38 +91,97 @@ def file_exists_in_drive(filename, parent_id, local_size):
     return False, None
 
 # Step 2: Walk local folder and upload
-for root, dirs, files in os.walk(LOCAL_FOLDER):
-    # Remove any excluded dirs from traversal
-    dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
-
-    # Map local root → Drive folder
-    rel_path = os.path.relpath(root, LOCAL_FOLDER)
-    if rel_path == ".":
-        current_parent = DRIVE_FOLDER_ID
-    else:
-        # Create subfolders as needed
-        parts = rel_path.split(os.sep)
-        parent_id = DRIVE_FOLDER_ID
-        accumulated = LOCAL_FOLDER
-        for part in parts:
-            accumulated = os.path.join(accumulated, part)
-            parent_id = get_or_create_drive_folder(accumulated, parent_id)
-        current_parent = parent_id
-
-    # Upload files into this Drive folder
-    for filename in files:
-        filepath = os.path.join(root, filename)
-        local_size = os.path.getsize(filepath)
-
-        exists, gfile = file_exists_in_drive(filename, current_parent, local_size)
-        if exists:
-            print(f"Skipping {filepath} (already uploaded, same size)")
+if ZIP_SUPPORT:
+    print("Zip mode enabled. Zipping first-level directories...")
+    # Iterate over immediate children
+    for item in os.listdir(LOCAL_FOLDER):
+        if item in EXCLUDE_DIRS:
             continue
+            
+        item_path = os.path.join(LOCAL_FOLDER, item)
+        
+        if os.path.isfile(item_path):
+            # Upload loose file directly to DRIVE_FOLDER_ID
+            local_size = os.path.getsize(item_path)
+            exists, gfile = file_exists_in_drive(item, DRIVE_FOLDER_ID, local_size)
+            if exists:
+                print(f"Skipping loose file {item_path} (already uploaded, same size)")
+                continue
 
-        print(f"Uploading {filepath} → Drive folder {current_parent}")
-        metadata = {"title": filename, "parents": [{"id": current_parent}]}
-        gfile = drive.CreateFile(metadata)
-        gfile.SetContentFile(filepath)
-        gfile.Upload()
+            print(f"Uploading loose file {item_path} → Drive folder {DRIVE_FOLDER_ID}")
+            metadata = {"title": item, "parents": [{"id": DRIVE_FOLDER_ID}]}
+            gfile = drive.CreateFile(metadata)
+            gfile.SetContentFile(item_path)
+            gfile.Upload()
+            
+        elif os.path.isdir(item_path):
+            # Zip this directory to a temp file
+            temp_dir = tempfile.gettempdir()
+            zip_base_name = os.path.join(temp_dir, item)
+            
+            print(f"Zipping directory {item_path} -> {zip_base_name}.zip")
+            shutil.make_archive(zip_base_name, 'zip', item_path)
+            zip_file_path = f"{zip_base_name}.zip"
+            zip_file_name = f"{item}.zip"
+            
+            local_size = os.path.getsize(zip_file_path)
+            exists, gfile = file_exists_in_drive(zip_file_name, DRIVE_FOLDER_ID, local_size)
+            if exists:
+                print(f"Skipping {zip_file_path} (already uploaded, same size)")
+                os.remove(zip_file_path)
+                continue
+
+            print(f"Uploading zip {zip_file_path} → Drive folder {DRIVE_FOLDER_ID}")
+            metadata = {"title": zip_file_name, "parents": [{"id": DRIVE_FOLDER_ID}]}
+            gfile = drive.CreateFile(metadata)
+            gfile.SetContentFile(zip_file_path)
+            gfile.Upload()
+            
+            # Clean up PyDrive file references
+            gfile = None
+            
+            # Clean up temp file
+            try:
+                os.remove(zip_file_path)
+            except PermissionError:
+                # Force garbage collection if Windows still holds the file handle
+                import gc
+                gc.collect()
+                os.remove(zip_file_path)
+
+else:
+    for root, dirs, files in os.walk(LOCAL_FOLDER):
+        # Remove any excluded dirs from traversal
+        dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+
+        # Map local root → Drive folder
+        rel_path = os.path.relpath(root, LOCAL_FOLDER)
+        if rel_path == ".":
+            current_parent = DRIVE_FOLDER_ID
+        else:
+            # Create subfolders as needed
+            parts = rel_path.split(os.sep)
+            parent_id = DRIVE_FOLDER_ID
+            accumulated = LOCAL_FOLDER
+            for part in parts:
+                accumulated = os.path.join(accumulated, part)
+                parent_id = get_or_create_drive_folder(accumulated, parent_id)
+            current_parent = parent_id
+
+        # Upload files into this Drive folder
+        for filename in files:
+            filepath = os.path.join(root, filename)
+            local_size = os.path.getsize(filepath)
+
+            exists, gfile = file_exists_in_drive(filename, current_parent, local_size)
+            if exists:
+                print(f"Skipping {filepath} (already uploaded, same size)")
+                continue
+
+            print(f"Uploading {filepath} → Drive folder {current_parent}")
+            metadata = {"title": filename, "parents": [{"id": current_parent}]}
+            gfile = drive.CreateFile(metadata)
+            gfile.SetContentFile(filepath)
+            gfile.Upload()
 
 print("Incremental backup complete!")
