@@ -10,6 +10,7 @@ import shutil
 import tempfile
 import zipfile
 import sys
+import json
 from pydrive2.auth import GoogleAuth, RefreshError
 from pydrive2.drive import GoogleDrive
 
@@ -60,8 +61,23 @@ LIMIT_COUNT = args.limit
 DRY_RUN = args.dry_run
 FOLDERS_ONLY = args.folders_only
 
-# Folders to exclude from backup (names only, not paths)
-EXCLUDE_DIRS = [".obsidian", "__pycache__", ".git", ".vscode"]
+# Load or create exclude.json
+EXCLUDE_CONFIG_FILE = "exclude.json"
+DEFAULT_EXCLUDE_CONFIG = {
+    "exclude_dirs": [".obsidian", "__pycache__", ".git", ".vscode"],
+    "exclude_extensions": [".obj", ".o", ".ilk", ".pdb", ".tlog", ".idb", ".reapeaks"]
+}
+
+if not os.path.exists(EXCLUDE_CONFIG_FILE):
+    with open(EXCLUDE_CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(DEFAULT_EXCLUDE_CONFIG, f, indent=4)
+    EXCLUDE_DIRS = DEFAULT_EXCLUDE_CONFIG["exclude_dirs"]
+    EXCLUDE_EXTENSIONS = DEFAULT_EXCLUDE_CONFIG["exclude_extensions"]
+else:
+    with open(EXCLUDE_CONFIG_FILE, "r", encoding="utf-8") as f:
+        exclude_data = json.load(f)
+    EXCLUDE_DIRS = exclude_data.get("exclude_dirs", DEFAULT_EXCLUDE_CONFIG["exclude_dirs"])
+    EXCLUDE_EXTENSIONS = exclude_data.get("exclude_extensions", DEFAULT_EXCLUDE_CONFIG["exclude_extensions"])
 
 # Cache of created Drive folders (local path → Drive folder ID)
 folder_cache = {}
@@ -79,14 +95,17 @@ def format_bytes(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}"
 
-def zip_directory_with_progress(dir_path, zip_path, exclude_dirs=None):
+def zip_directory_with_progress(dir_path, zip_path, exclude_dirs=None, exclude_extensions=None):
     if exclude_dirs is None:
         exclude_dirs = []
+    if exclude_extensions is None:
+        exclude_extensions = []
         
     total_files = 0
     for root, dirs, files in os.walk(dir_path):
         dirs[:] = [d for d in dirs if d not in exclude_dirs]
-        total_files += len(files)
+        valid_files = [f for f in files if not f.endswith(tuple(exclude_extensions))]
+        total_files += len(valid_files)
         
     if total_files == 0:
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
@@ -97,7 +116,8 @@ def zip_directory_with_progress(dir_path, zip_path, exclude_dirs=None):
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for root, dirs, files in os.walk(dir_path):
             dirs[:] = [d for d in dirs if d not in exclude_dirs]
-            for file in files:
+            valid_files = [f for f in files if not f.endswith(tuple(exclude_extensions))]
+            for file in valid_files:
                 filepath = os.path.join(root, file)
                 arcname = os.path.relpath(filepath, dir_path)
                 zipf.write(filepath, arcname)
@@ -169,6 +189,9 @@ if ZIP_SUPPORT:
         if os.path.isfile(item_path):
             if FOLDERS_ONLY:
                 continue
+                
+            if item.endswith(tuple(EXCLUDE_EXTENSIONS)):
+                continue
 
             # Upload loose file directly to DRIVE_FOLDER_ID
             local_size = os.path.getsize(item_path)
@@ -196,7 +219,7 @@ if ZIP_SUPPORT:
             
             zip_file_path = f"{zip_base_name}.zip"
             print(f"Zipping directory {item_path} -> {zip_file_path}")
-            zip_directory_with_progress(item_path, zip_file_path, exclude_dirs=EXCLUDE_DIRS)
+            zip_directory_with_progress(item_path, zip_file_path, exclude_dirs=EXCLUDE_DIRS, exclude_extensions=EXCLUDE_EXTENSIONS)
             zip_file_name = f"{item}.zip"
             
             local_size = os.path.getsize(zip_file_path)
@@ -258,6 +281,9 @@ else:
 
         # Upload files into this Drive folder
         for filename in files:
+            if filename.endswith(tuple(EXCLUDE_EXTENSIONS)):
+                continue
+
             if LIMIT_COUNT > 0 and (total_files_uploaded + total_folders_uploaded) >= LIMIT_COUNT:
                 print(f"Reached processing limit of {LIMIT_COUNT}. Stopping.")
                 break

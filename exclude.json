@@ -1,0 +1,17 @@
+{
+    "exclude_dirs": [
+        ".obsidian",
+        "__pycache__",
+        ".git",
+        ".vscode"
+    ],
+    "exclude_extensions": [
+        ".obj",
+        ".o",
+        ".ilk",
+        ".pdb",
+        ".tlog",
+        ".idb",
+        ".reapeaks"
+    ]
+}
