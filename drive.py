@@ -16,6 +16,8 @@ parser = argparse.ArgumentParser(description="Backup a local folder to Google Dr
 parser.add_argument("-s", "--source", required=True, help="Local source path to back up")
 parser.add_argument("-d", "--destination", required=True, help="Target Google Drive folder ID")
 parser.add_argument("-z", "--zip", action="store_true", help="Zip files before uploading (to be implemented)")
+parser.add_argument("-n", "--limit", type=int, default=0, help="Maximum number of files/folders to process (0 = no limit)")
+parser.add_argument("--dry-run", action="store_true", help="Report sizes without uploading")
 args = parser.parse_args()
 
 # Step 1: Authenticate
@@ -51,6 +53,8 @@ drive = GoogleDrive(gauth)
 LOCAL_FOLDER = args.source
 DRIVE_FOLDER_ID = args.destination
 ZIP_SUPPORT = args.zip
+LIMIT_COUNT = args.limit
+DRY_RUN = args.dry_run
 
 # Folders to exclude from backup (names only, not paths)
 EXCLUDE_DIRS = [".obsidian", "__pycache__", ".git", ".vscode"]
@@ -116,6 +120,10 @@ if ZIP_SUPPORT:
     print("Zip mode enabled. Zipping first-level directories...")
     # Iterate over immediate children
     for item in os.listdir(LOCAL_FOLDER):
+        if LIMIT_COUNT > 0 and (total_files_uploaded + total_folders_uploaded) >= LIMIT_COUNT:
+            print(f"Reached processing limit of {LIMIT_COUNT}. Stopping.")
+            break
+
         if item in EXCLUDE_DIRS:
             continue
             
@@ -124,16 +132,19 @@ if ZIP_SUPPORT:
         if os.path.isfile(item_path):
             # Upload loose file directly to DRIVE_FOLDER_ID
             local_size = os.path.getsize(item_path)
-            exists, gfile = file_exists_in_drive(item, DRIVE_FOLDER_ID, local_size)
-            if exists:
-                print(f"Skipping loose file {item_path} (already uploaded, same size)")
-                continue
+            if not DRY_RUN:
+                exists, gfile = file_exists_in_drive(item, DRIVE_FOLDER_ID, local_size)
+                if exists:
+                    print(f"Skipping loose file {item_path} (already uploaded, same size)")
+                    continue
 
-            print(f"Uploading loose file {item_path} → Drive folder {DRIVE_FOLDER_ID}")
-            metadata = {"title": item, "parents": [{"id": DRIVE_FOLDER_ID}]}
-            gfile = drive.CreateFile(metadata)
-            gfile.SetContentFile(item_path)
-            gfile.Upload()
+                print(f"Uploading loose file {item_path} → Drive folder {DRIVE_FOLDER_ID}")
+                metadata = {"title": item, "parents": [{"id": DRIVE_FOLDER_ID}]}
+                gfile = drive.CreateFile(metadata)
+                gfile.SetContentFile(item_path)
+                gfile.Upload()
+            else:
+                print(f"[DRY RUN] Would upload loose file {item_path} ({format_bytes(local_size)})")
             
             total_files_uploaded += 1
             total_bytes_uploaded += local_size
@@ -149,17 +160,20 @@ if ZIP_SUPPORT:
             zip_file_name = f"{item}.zip"
             
             local_size = os.path.getsize(zip_file_path)
-            exists, gfile = file_exists_in_drive(zip_file_name, DRIVE_FOLDER_ID, local_size)
-            if exists:
-                print(f"Skipping {zip_file_path} (already uploaded, same size)")
-                os.remove(zip_file_path)
-                continue
+            if not DRY_RUN:
+                exists, gfile = file_exists_in_drive(zip_file_name, DRIVE_FOLDER_ID, local_size)
+                if exists:
+                    print(f"Skipping {zip_file_path} (already uploaded, same size)")
+                    os.remove(zip_file_path)
+                    continue
 
-            print(f"Uploading zip {zip_file_path} → Drive folder {DRIVE_FOLDER_ID}")
-            metadata = {"title": zip_file_name, "parents": [{"id": DRIVE_FOLDER_ID}]}
-            gfile = drive.CreateFile(metadata)
-            gfile.SetContentFile(zip_file_path)
-            gfile.Upload()
+                print(f"Uploading zip {zip_file_path} → Drive folder {DRIVE_FOLDER_ID}")
+                metadata = {"title": zip_file_name, "parents": [{"id": DRIVE_FOLDER_ID}]}
+                gfile = drive.CreateFile(metadata)
+                gfile.SetContentFile(zip_file_path)
+                gfile.Upload()
+            else:
+                print(f"[DRY RUN] Would upload zip {zip_file_name} ({format_bytes(local_size)})")
             
             total_folders_uploaded += 1
             total_bytes_uploaded += local_size
@@ -178,6 +192,9 @@ if ZIP_SUPPORT:
 
 else:
     for root, dirs, files in os.walk(LOCAL_FOLDER):
+        if LIMIT_COUNT > 0 and (total_files_uploaded + total_folders_uploaded) >= LIMIT_COUNT:
+            break
+
         # Remove any excluded dirs from traversal
         dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
 
@@ -192,24 +209,32 @@ else:
             accumulated = LOCAL_FOLDER
             for part in parts:
                 accumulated = os.path.join(accumulated, part)
-                parent_id = get_or_create_drive_folder(accumulated, parent_id)
+                if not DRY_RUN:
+                    parent_id = get_or_create_drive_folder(accumulated, parent_id)
             current_parent = parent_id
 
         # Upload files into this Drive folder
         for filename in files:
+            if LIMIT_COUNT > 0 and (total_files_uploaded + total_folders_uploaded) >= LIMIT_COUNT:
+                print(f"Reached processing limit of {LIMIT_COUNT}. Stopping.")
+                break
+
             filepath = os.path.join(root, filename)
             local_size = os.path.getsize(filepath)
 
-            exists, gfile = file_exists_in_drive(filename, current_parent, local_size)
-            if exists:
-                print(f"Skipping {filepath} (already uploaded, same size)")
-                continue
+            if not DRY_RUN:
+                exists, gfile = file_exists_in_drive(filename, current_parent, local_size)
+                if exists:
+                    print(f"Skipping {filepath} (already uploaded, same size)")
+                    continue
 
-            print(f"Uploading {filepath} → Drive folder {current_parent}")
-            metadata = {"title": filename, "parents": [{"id": current_parent}]}
-            gfile = drive.CreateFile(metadata)
-            gfile.SetContentFile(filepath)
-            gfile.Upload()
+                print(f"Uploading {filepath} → Drive folder {current_parent}")
+                metadata = {"title": filename, "parents": [{"id": current_parent}]}
+                gfile = drive.CreateFile(metadata)
+                gfile.SetContentFile(filepath)
+                gfile.Upload()
+            else:
+                print(f"[DRY RUN] Would upload {filepath} ({format_bytes(local_size)})")
             
             total_files_uploaded += 1
             total_bytes_uploaded += local_size
