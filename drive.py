@@ -8,7 +8,7 @@ import os
 import argparse
 import shutil
 import tempfile
-from pydrive2.auth import GoogleAuth
+from pydrive2.auth import GoogleAuth, RefreshError
 from pydrive2.drive import GoogleDrive
 
 # Parse command line arguments
@@ -29,7 +29,15 @@ if gauth.credentials is None:
     gauth.LocalWebserverAuth()
 elif gauth.access_token_expired:
     # Refresh them if expired
-    gauth.Refresh()
+    try:
+        gauth.Refresh()
+    except RefreshError as e:
+        print(f"Refresh token error: {e}")
+        print("Deleting expired credentials and re-authenticating...")
+        if os.path.exists("credentials.json"):
+            os.remove("credentials.json")
+        gauth.credentials = None
+        gauth.LocalWebserverAuth()
 else:
     # Initialize the saved creds
     gauth.Authorize()
