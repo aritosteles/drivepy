@@ -58,6 +58,19 @@ EXCLUDE_DIRS = [".obsidian", "__pycache__", ".git", ".vscode"]
 # Cache of created Drive folders (local path → Drive folder ID)
 folder_cache = {}
 
+total_files_uploaded = 0
+total_folders_uploaded = 0
+total_bytes_uploaded = 0
+
+def format_bytes(size):
+    power = 1024
+    n = 0
+    power_labels = {0: 'B', 1: 'KB', 2: 'MB', 3: 'GB', 4: 'TB'}
+    while size >= power and n < 4:
+        size /= power
+        n += 1
+    return f"{size:.2f} {power_labels[n]}"
+
 def get_or_create_drive_folder(local_path, parent_id):
     """Ensure the corresponding folder exists in Drive and return its ID."""
     if local_path in folder_cache:
@@ -122,6 +135,9 @@ if ZIP_SUPPORT:
             gfile.SetContentFile(item_path)
             gfile.Upload()
             
+            total_files_uploaded += 1
+            total_bytes_uploaded += local_size
+            
         elif os.path.isdir(item_path):
             # Zip this directory to a temp file
             temp_dir = tempfile.gettempdir()
@@ -144,6 +160,9 @@ if ZIP_SUPPORT:
             gfile = drive.CreateFile(metadata)
             gfile.SetContentFile(zip_file_path)
             gfile.Upload()
+            
+            total_folders_uploaded += 1
+            total_bytes_uploaded += local_size
             
             # Clean up PyDrive file references
             gfile = None
@@ -191,5 +210,11 @@ else:
             gfile = drive.CreateFile(metadata)
             gfile.SetContentFile(filepath)
             gfile.Upload()
+            
+            total_files_uploaded += 1
+            total_bytes_uploaded += local_size
 
 print("Incremental backup complete!")
+print(f"Total files uploaded: {total_files_uploaded}")
+print(f"Total folders uploaded (as zip): {total_folders_uploaded}")
+print(f"Total data uploaded: {format_bytes(total_bytes_uploaded)}")
