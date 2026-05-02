@@ -8,6 +8,8 @@ import os
 import argparse
 import shutil
 import tempfile
+import zipfile
+import sys
 from pydrive2.auth import GoogleAuth, RefreshError
 from pydrive2.drive import GoogleDrive
 
@@ -18,6 +20,7 @@ parser.add_argument("-d", "--destination", required=True, help="Target Google Dr
 parser.add_argument("-z", "--zip", action="store_true", help="Zip files before uploading (to be implemented)")
 parser.add_argument("-n", "--limit", type=int, default=0, help="Maximum number of files/folders to process (0 = no limit)")
 parser.add_argument("--dry-run", action="store_true", help="Report sizes without uploading")
+parser.add_argument("--folders-only", action="store_true", help="Process only folders and skip loose files")
 args = parser.parse_args()
 
 # Step 1: Authenticate
@@ -55,6 +58,7 @@ DRIVE_FOLDER_ID = args.destination
 ZIP_SUPPORT = args.zip
 LIMIT_COUNT = args.limit
 DRY_RUN = args.dry_run
+FOLDERS_ONLY = args.folders_only
 
 # Folders to exclude from backup (names only, not paths)
 EXCLUDE_DIRS = [".obsidian", "__pycache__", ".git", ".vscode"]
@@ -74,6 +78,39 @@ def format_bytes(size):
         size /= power
         n += 1
     return f"{size:.2f} {power_labels[n]}"
+
+def zip_directory_with_progress(dir_path, zip_path, exclude_dirs=None):
+    if exclude_dirs is None:
+        exclude_dirs = []
+        
+    total_files = 0
+    for root, dirs, files in os.walk(dir_path):
+        dirs[:] = [d for d in dirs if d not in exclude_dirs]
+        total_files += len(files)
+        
+    if total_files == 0:
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            pass
+        return
+
+    processed_files = 0
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for root, dirs, files in os.walk(dir_path):
+            dirs[:] = [d for d in dirs if d not in exclude_dirs]
+            for file in files:
+                filepath = os.path.join(root, file)
+                arcname = os.path.relpath(filepath, dir_path)
+                zipf.write(filepath, arcname)
+                
+                processed_files += 1
+                percent = int(100 * processed_files / total_files)
+                bar_length = 40
+                filled_length = int(bar_length * processed_files // total_files)
+                bar = '█' * filled_length + '-' * (bar_length - filled_length)
+                
+                sys.stdout.write(f'\r  Zipping {os.path.basename(dir_path)[:15]:<15}: |{bar}| {percent}% ({processed_files}/{total_files})')
+                sys.stdout.flush()
+    print()
 
 def get_or_create_drive_folder(local_path, parent_id):
     """Ensure the corresponding folder exists in Drive and return its ID."""
@@ -130,6 +167,9 @@ if ZIP_SUPPORT:
         item_path = os.path.join(LOCAL_FOLDER, item)
         
         if os.path.isfile(item_path):
+            if FOLDERS_ONLY:
+                continue
+
             # Upload loose file directly to DRIVE_FOLDER_ID
             local_size = os.path.getsize(item_path)
             if not DRY_RUN:
@@ -154,9 +194,9 @@ if ZIP_SUPPORT:
             temp_dir = tempfile.gettempdir()
             zip_base_name = os.path.join(temp_dir, item)
             
-            print(f"Zipping directory {item_path} -> {zip_base_name}.zip")
-            shutil.make_archive(zip_base_name, 'zip', item_path)
             zip_file_path = f"{zip_base_name}.zip"
+            print(f"Zipping directory {item_path} -> {zip_file_path}")
+            zip_directory_with_progress(item_path, zip_file_path, exclude_dirs=EXCLUDE_DIRS)
             zip_file_name = f"{item}.zip"
             
             local_size = os.path.getsize(zip_file_path)
@@ -212,6 +252,9 @@ else:
                 if not DRY_RUN:
                     parent_id = get_or_create_drive_folder(accumulated, parent_id)
             current_parent = parent_id
+
+        if FOLDERS_ONLY:
+            continue
 
         # Upload files into this Drive folder
         for filename in files:
