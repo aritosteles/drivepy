@@ -184,7 +184,7 @@ if ZIP_SUPPORT:
                 gfile.SetContentFile(item_path)
                 gfile.Upload()
             else:
-                print(f"[DRY RUN] Would upload loose file {item_path} ({format_bytes(local_size)})")
+                print(f"[DRY RUN] {item_path} ({format_bytes(local_size)})")
             
             total_files_uploaded += 1
             total_bytes_uploaded += local_size
@@ -213,7 +213,7 @@ if ZIP_SUPPORT:
                 gfile.SetContentFile(zip_file_path)
                 gfile.Upload()
             else:
-                print(f"[DRY RUN] Would upload zip {zip_file_name} ({format_bytes(local_size)})")
+                print(f"[DRY RUN] {zip_file_name} ({format_bytes(local_size)})")
             
             total_folders_uploaded += 1
             total_bytes_uploaded += local_size
@@ -277,7 +277,7 @@ else:
                 gfile.SetContentFile(filepath)
                 gfile.Upload()
             else:
-                print(f"[DRY RUN] Would upload {filepath} ({format_bytes(local_size)})")
+                print(f"[DRY RUN] {filepath} ({format_bytes(local_size)})")
             
             total_files_uploaded += 1
             total_bytes_uploaded += local_size
