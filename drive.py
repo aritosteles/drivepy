@@ -22,6 +22,7 @@ parser.add_argument("-z", "--zip", action="store_true", help="Zip files before u
 parser.add_argument("-n", "--limit", type=int, default=0, help="Maximum number of files/folders to process (0 = no limit)")
 parser.add_argument("--dry-run", action="store_true", help="Report sizes without uploading")
 parser.add_argument("--folders-only", action="store_true", help="Process only folders and skip loose files")
+parser.add_argument("-c", "--compression", choices=['deflate', 'lzma'], default='deflate', help="Compression algorithm to use (default: deflate)")
 args = parser.parse_args()
 
 # Step 1: Authenticate
@@ -60,6 +61,7 @@ ZIP_SUPPORT = args.zip
 LIMIT_COUNT = args.limit
 DRY_RUN = args.dry_run
 FOLDERS_ONLY = args.folders_only
+COMPRESSION_ALGORITHM = zipfile.ZIP_DEFLATED if args.compression == 'deflate' else zipfile.ZIP_LZMA
 
 # Load or create exclude.json
 EXCLUDE_CONFIG_FILE = "exclude.json"
@@ -95,7 +97,7 @@ def format_bytes(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}"
 
-def zip_directory_with_progress(dir_path, zip_path, exclude_dirs=None, exclude_extensions=None):
+def zip_directory_with_progress(dir_path, zip_path, exclude_dirs=None, exclude_extensions=None, compression=zipfile.ZIP_DEFLATED):
     if exclude_dirs is None:
         exclude_dirs = []
     if exclude_extensions is None:
@@ -108,12 +110,12 @@ def zip_directory_with_progress(dir_path, zip_path, exclude_dirs=None, exclude_e
         total_files += len(valid_files)
         
     if total_files == 0:
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        with zipfile.ZipFile(zip_path, 'w', compression) as zipf:
             pass
         return
 
     processed_files = 0
-    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+    with zipfile.ZipFile(zip_path, 'w', compression) as zipf:
         for root, dirs, files in os.walk(dir_path):
             dirs[:] = [d for d in dirs if d not in exclude_dirs]
             valid_files = [f for f in files if not f.endswith(tuple(exclude_extensions))]
@@ -218,8 +220,8 @@ if ZIP_SUPPORT:
             zip_base_name = os.path.join(temp_dir, item)
             
             zip_file_path = f"{zip_base_name}.zip"
-            print(f"Zipping directory {item_path} -> {zip_file_path}")
-            zip_directory_with_progress(item_path, zip_file_path, exclude_dirs=EXCLUDE_DIRS, exclude_extensions=EXCLUDE_EXTENSIONS)
+            print(f"Zipping directory {item_path} -> {zip_file_path} (Algorithm: {args.compression})")
+            zip_directory_with_progress(item_path, zip_file_path, exclude_dirs=EXCLUDE_DIRS, exclude_extensions=EXCLUDE_EXTENSIONS, compression=COMPRESSION_ALGORITHM)
             zip_file_name = f"{item}.zip"
             
             local_size = os.path.getsize(zip_file_path)
